@@ -1,0 +1,12 @@
+{
+  "name": "test",
+  "version": "0.1.0",
+  "private": true,
+  "dependencies": {
+    "@elastic/elasticsearch": "^7.12.0",
+    "node-fetch": "^2.6.1"
+  },
+  "scripts": {
+    "start": "node app.js"
+  }
+}
