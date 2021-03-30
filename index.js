@@ -20,28 +20,47 @@ const indexMetadata = metadata_file => {
     console.log("Done.")
 }
 
-const indexTranscripts = transformed_dir => {
+const indexFile = filepath => {
+    
+    const promises = []
+    
+    const file = JSON.parse(fs.readFileSync(filepath))
+
+    file.data.forEach(x => {
+        promises.push(new Promise((resolve, reject) => {
+            
+            x._id = file.id
+            
+            client.index({
+                index: TRANSCRIPTS_INDEX,
+                body: x
+            })
+            .then(resolve)
+            .catch(reject)
+        }))
+    })
+
+    return Promise.all(promises)
+}
+
+const indexTranscripts = async transformed_dir => {
     console.log("Indexing transcripts...")
 
     const dir = fs.readdirSync(transformed_dir)
 
-    dir.forEach(async f => {
-        const file = JSON.parse(fs.readFileSync(transformed_dir + f))
-
-        file.data.forEach(async x => {
-            x._id = file._id
-            await client.index({
-                index: TRANSCRIPTS_INDEX,
-                body: x
-            })
-        })
-
-    })
+    for (let i = 0; i < dir.length; i++) {
+        console.log(i)
+        try {
+            await indexFile(transformed_dir + dir[i])
+        } catch (e) {
+            console.log(e)
+        }
+    }
 
     console.log("Done.")
 }
 
-indexTranscripts("./transformed/")
+indexTranscripts("/media/axel/StorageLinux/podcasts-no-audio-13GB/transformed/")
 
 module.exports = {
     indexMetadata,
