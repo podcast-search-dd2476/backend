@@ -29,7 +29,7 @@ const indexFile = filepath => {
     file.data.forEach(x => {
         promises.push(new Promise((resolve, reject) => {
             
-            x._id = file.id
+            x.id = file.id
             
             client.index({
                 index: TRANSCRIPTS_INDEX,
