@@ -21,17 +21,23 @@ const searchMetadata = async docID => {
 // searchMetadata("7zyeQozJ0AznBJ2DXILUy8")
 
 const searchPodcast = async transcript => {
-    const { body } = await client.search({
-        index: TRANSCRIPTS_INDEX,
-        body: {
-          query: {
-            match: { "data.transcript": transcript }
-          }
-        }
-    })
-
-    console.log(body.hits.hits)
-    return body
+    try {
+        const { body } = await client.search({
+            index: TRANSCRIPTS_INDEX,
+            body: {
+              query: {
+                match: { "transcript": transcript }
+              }
+            }
+        })
+        
+        console.log(body.hits.hits)
+        return body
+    }
+    catch(e) {
+        console.log(e)
+        return null
+    }
 }
 
 searchPodcast("no")

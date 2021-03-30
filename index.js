@@ -28,16 +28,20 @@ const indexTranscripts = transformed_dir => {
     dir.forEach(async f => {
         const file = JSON.parse(fs.readFileSync(transformed_dir + f))
 
-        await client.index({
-            index: TRANSCRIPTS_INDEX,
-            body: file
+        file.data.forEach(async x => {
+            x._id = file._id
+            await client.index({
+                index: TRANSCRIPTS_INDEX,
+                body: x
+            })
         })
+
     })
 
     console.log("Done.")
 }
 
-indexTranscripts("/media/axel/StorageLinux/podcasts-no-audio-13GB/transformed/")
+indexTranscripts("./transformed/")
 
 module.exports = {
     indexMetadata,
