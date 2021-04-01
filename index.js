@@ -1,11 +1,16 @@
 const fs = require("fs")
 const { Client } = require('@elastic/elasticsearch')
-const client = new Client({ node: 'http://localhost:9200' })
+const { TRANSCRIPTS_INDEX, METADATA_INDEX, ELASTIC_URL } = require('./configuration')
+const client = new Client({ node: ELASTIC_URL })
 
-
-const METADATA_INDEX = "metadata_index"
-const TRANSCRIPTS_INDEX = "transcripts_index"
-
+/**
+ * Indexes the metadata file.
+ * 
+ * Before using this function, the metadata.tsv file needs to be converted
+ * to JSON. Use the metadata.js script for that.
+ * 
+ * @param {string} metadata_file file to index
+ */
 const indexMetadata = metadata_file => {
     console.log("Indexing metadata file...")
     const mf = JSON.parse(fs.readFileSync(metadata_file))
@@ -20,6 +25,10 @@ const indexMetadata = metadata_file => {
     console.log("Done.")
 }
 
+/**
+ * Indexes one file.
+ * @param {string} filepath path to file
+ */
 const indexFile = filepath => {
     
     const promises = []
@@ -43,6 +52,10 @@ const indexFile = filepath => {
     return Promise.all(promises)
 }
 
+/**
+ * Indexes all file in a directory
+ * @param {string} transformed_dir the directory to index
+ */
 const indexTranscripts = async transformed_dir => {
     console.log("Indexing transcripts...")
 
@@ -59,8 +72,6 @@ const indexTranscripts = async transformed_dir => {
 
     console.log("Done.")
 }
-
-indexTranscripts("/media/axel/StorageLinux/podcasts-no-audio-13GB/transformed/")
 
 module.exports = {
     indexMetadata,

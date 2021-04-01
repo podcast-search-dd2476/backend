@@ -1,53 +1,27 @@
-const fs = require('fs');
-const fetch = require('node-fetch')
+const express = require('express')
+const app = express()
+const cors = require('cors')
+const morgan = require('morgan')
+const fs = require('fs')
+const path = require('path')
+const bodyParser = require('body-parser')
 
-const { Client } = require('@elastic/elasticsearch')
-const client = new Client({ node: 'http://localhost:9200' })
+const searcher = require('./search')
 
-const f = JSON.parse(fs.readFileSync('./test.json'));
+app.use(cors());
+app.use(bodyParser.json())
+app.use(morgan("common"))
 
-const doPost = _ => {
+app.get("/", async (req, res) => {
+    const { search, type } = req.query
+    console.log(search)
+    if (!search) return res.status(400).json({"error": "Missing search query"})
+    
+    let options = undefined
+    if (type) options = { type }
 
-    f.results.forEach(x => {
-        x.alternatives.forEach(y => {
-            if (Object.keys(y).length > 0) {
-                fetch('http://localhost:9200/my-index-000002/_doc?pretty', {
-                    method: "POST",
-                    headers: {
-                        "Content-Type": "application/json"
-                    },
-                    body: JSON.stringify(y)
-                })
-                .then(res => res.json())
-                .then(console.log)
-            }
-        })
-    })
+    return res.status(200).json(await searcher.search(search, options))
+})
 
-}
-
-// doPost()
-
-const get = async () =>  {
-    // promise API
-    const result = await client.search({
-        index: 'my-index-000002',
-        body: {
-          query: {
-            match: { "words.word": '' }
-          }
-        }
-    })
-    .then(result => {
-        // console.log(result)
-        result.body.hits.hits.forEach(x => {
-            console.log(x._source.transcript + "\n")
-
-        })
-        // console.log(result.body.hits.hits[2]._source)
-        // console.log(result.body.hits.hits[0]._source.results.length)
-    })
-}
-
-
-get()
+const PORT = 5000
+app.listen(PORT, () => console.log(`Listening on port ${PORT}!`))
