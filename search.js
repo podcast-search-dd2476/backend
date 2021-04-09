@@ -188,11 +188,25 @@ const searchLonger = async (query, options = defaultSearchOptions) => {
       // Only save the matching episode
       const episode_data = pod_data.hits.hits[0]._source.episodes.filter(e => e.episode_filename_prefix === episode_id)[0]
 
-      results.results.push({surrounding_texts, pod_data, transcript: modified_text, episode_data})
+      results.results.push({pod_data, transcript: modified_text, episode_data})
     }
   }
+  return groupByPodcast(results.results)
+}
 
-  return results
+function groupByPodcast (results) {
+  let all_podcasts = {}
+  for (let i = 0; i < results.length; i++) {
+    let episode = results[i]
+    const pod_id = episode.pod_data.hits.hits[0]._source.podcast_filename_prefix
+    if (pod_id in all_podcasts) {
+      let episodes = all_podcasts[pod_id]
+      episodes.push(episode)
+    } else {
+      all_podcasts[pod_id] = [episode]
+    }
+  }
+  return Object.values(all_podcasts)
 }
 
 /**
@@ -208,7 +222,7 @@ function combineTexts(surrounding_texts, hit) {
     const text = surrounding_texts[i]._source
     if (text.index < hit.index) {
       // insert text before the original text
-      new_hit.transcripts.unshift(text)
+      new_hit.transcripts.splice(0, 0, text)
       new_hit.startTime = text.startTime
     } else { // the current text is after the text that was originally retrieved
       new_hit.transcripts.push(text)
