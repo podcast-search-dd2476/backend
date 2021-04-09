@@ -26,7 +26,8 @@ const searchMetadata = async docID => {
 }
 
 const defaultSearchOptions = {
-  type: "match"
+  type: "match",
+  size: 10,
 }
 
 /**
@@ -34,15 +35,20 @@ const defaultSearchOptions = {
  * @param {string} transcript the text to search for
  */
 const searchPodcast = async (transcript, options = defaultSearchOptions) => {
+  if (options.size <= 0) options.size = 10
+  
   try {
     const { body } = await client.search({
       index: TRANSCRIPTS_INDEX,
+      size: options.size || defaultSearchOptions.size,
       body: {
         query: {
           [options["type"]]: { "transcript": transcript }
         }
       }
     })
+
+    console.log(body.hits.hits.length)
 
     return { body, error: false }
 
