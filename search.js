@@ -144,6 +144,7 @@ const search = async (query, options = defaultSearchOptions) => {
  * given a query, returns objects that match the query (from both the transcripts and metadata indexes)
  */
 const searchLonger = async (query, options = defaultSearchOptions) => {
+  let startTime = Date.now()
   console.log(options)
   const result = await searchPodcast(query, options)
   if (result.error) return result
@@ -191,7 +192,12 @@ const searchLonger = async (query, options = defaultSearchOptions) => {
       results.results.push({pod_data, transcript: modified_text, episode_data})
     }
   }
-  return groupByPodcast(results.results)
+
+  let endTime = Date.now() - startTime
+  return {
+    results: groupByPodcast(results.results),
+    took: endTime
+  }
 }
 
 function groupByPodcast (results) {
