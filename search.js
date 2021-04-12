@@ -26,7 +26,7 @@ const searchMetadata = async docID => {
 }
 
 /**
- * Searches the metadata index
+ * Searches the metadata index for matches in name or description
  * @param {string} searchQ the text to search the podcast metadata fields
  */
  const searchDescription = async (searchQ, options = defaultSearchOptions) => {
@@ -119,77 +119,66 @@ const searchPodcast = async (transcript, options = defaultSearchOptions) => {
   }
 }
 
-const search = async (query, options = defaultSearchOptions) => {
-  console.log(options)
-  const result = await searchPodcast(query, options)
-  if (result.error) return result
-
-  const results = { results: [], error: false}
-  
-  for (let i = 0; i < result.body.hits.hits.length; i++) {
-    const hit = result.body.hits.hits[i]
-    const episode_id = hit._source.id
-    const pod_data = await searchMetadata(episode_id)
-    
-    // Only save the matching episode
-    const episode_data = pod_data.hits.hits[0]._source.episodes.filter(e => e.episode_filename_prefix === episode_id)[0]
-
-    results.results.push({pod_data, transcript: hit, episode_data})
-  }
-
-  return results
-}
-
 /**
- * given a query, returns objects that match the query (from both the transcripts and metadata indexes)
+ * given a query, returns objects that match the query from  metadata index
  */
-const searchLonger = async (query, options = defaultSearchOptions) => {
-  let startTime = Date.now()
+const searchDesc = async (query, options = defaultSearchOptions) => {
   console.log(options)
-  const result = await searchPodcast(query, options)
-  if (result.error) return result
   const descNameResult = await searchDescription(query, options)
   if (descNameResult.error) return descNameResult
 
-  const results = { descResults: [], results: [], error: false}
+  const results = { results: [], error: false}
 
   // TODO: display this in FE?
   // add the podcasts that match on title or description
   for (let i = 0; i < descNameResult.length; i++) {
     const hit = descNameResult[i]
     const src = hit._source
-    results.descResults.push(src)
+    results.results.push(src)
   }
+
+  return results
+}
+
+/**
+ * given a query, returns objects that match the query from the transcripts index
+ */
+const search = async (query, options = defaultSearchOptions) => {
+  let startTime = Date.now()
+  console.log(options)
+  const result = await searchPodcast(query, options)
+  if (result.error) return result
+
+  const results = { results: [], error: false}
 
   segs_to_combine = findSegmentsToCombine(result.body.hits.hits)
   let checked_episodes = []
 
-  // add the podcast sections that match on transcript
+  // add the podcast segments that match on transcript to the data structure to return
   for (let i = 0; i < result.body.hits.hits.length; i++) {
-    const hit = result.body.hits.hits[i]
-    const episode_id = hit._source.id
-    let text_index = hit._source.index
-    let modified_text = null // data structure to hold the modified text segments 
-    let surrounding_texts // data structure to hold the segments that are in the proxmity of matching segments
+    const hit = result.body.hits.hits[i]._source
+    const episode_id = hit.id
+    let text_index = hit.index
+    let combined_segments = null // data structure to hold the modified text segments 
 
     // handle the segments where other segments of same episode also matched on the query
     if (segs_to_combine[episode_id] && !checked_episodes.includes(episode_id)) {
       let segments = segs_to_combine[episode_id].filter(s => s.index != text_index).map(s => s.transcript)
-      modified_text = combineTexts(segments, hit._source)
+      combined_segments = combineSegments(segments, hit)
       checked_episodes.push(episode_id)
     }
 
     // handle segments that were the only match in that episode for specified query
     else if (!checked_episodes.includes(episode_id)) {
-      surrounding_texts = await searchSurroundingSegments(episode_id, text_index)
-      modified_text = combineTexts(surrounding_texts, hit._source)
+      const surrounding_texts = await searchSurroundingSegments(episode_id, text_index)
+      combined_segments = combineSegments(surrounding_texts, hit)
     }
-    if ( modified_text != null) {
+    if ( combined_segments != null) {
       const pod_data = await searchMetadata(episode_id)
       // Only save the matching episode
       const episode_data = pod_data.hits.hits[0]._source.episodes.filter(e => e.episode_filename_prefix === episode_id)[0]
 
-      results.results.push({pod_data, transcript: modified_text, episode_data})
+      results.results.push({pod_data: pod_data.hits.hits[0]._source, transcript: combined_segments, episode_data})
     }
   }
 
@@ -200,11 +189,15 @@ const searchLonger = async (query, options = defaultSearchOptions) => {
   }
 }
 
+/**
+ * Groups the matching episodes by podcast
+ * @param {Array} results Array of episodes
+ */
 function groupByPodcast (results) {
   let all_podcasts = {}
   for (let i = 0; i < results.length; i++) {
     let episode = results[i]
-    const pod_id = episode.pod_data.hits.hits[0]._source.podcast_filename_prefix
+    const pod_id = episode.pod_data.podcast_filename_prefix
     if (pod_id in all_podcasts) {
       let episodes = all_podcasts[pod_id]
       episodes.push(episode)
@@ -216,23 +209,28 @@ function groupByPodcast (results) {
 }
 
 /**
- * Combines the texts from multiple segments into one datastructure
- * @param {Array} surrounding_texts Array of text segment objects that are from the same episode as hit
+ * Combines the data from multiple segments into one datastructure
+ * @param {Array} surrounding_segments Array of text segment objects that are from the same episode as hit
  * @param {Object} hit object of type transcript. Segment from specific episode
+ * @return {Object} hit object containing an object containing:
+ * array of all segments
+ * id of the original match (if this is a combination of multiple segments that all have matched the query, this will be the index of the highest rank)
+ * startTime: start time of first segment
+ * endTime: end time of last segment
  */
-function combineTexts(surrounding_texts, hit) {
+function combineSegments(surrounding_segments, hit) {
   const new_hit = {}
-  new_hit.original_match = hit
+  new_hit.original_match_index = hit.index
   new_hit.transcripts = [hit]
-  for (let i = 0; i < surrounding_texts.length; i++) {
-    const text = surrounding_texts[i]._source
-    if (text.index < hit.index) {
+  for (let i = 0; i < surrounding_segments.length; i++) {
+    const segment = surrounding_segments[i]._source
+    if (segment.index < hit.index) {
       // insert text before the original text
-      new_hit.transcripts.splice(0, 0, text)
-      new_hit.startTime = text.startTime
+      new_hit.transcripts.splice(0, 0, segment)
+      new_hit.startTime = segment.startTime
     } else { // the current text is after the text that was originally retrieved
-      new_hit.transcripts.push(text)
-      new_hit.endTime = text.endTime
+      new_hit.transcripts.push(segment)
+      new_hit.endTime = segment.endTime
     }
   }
   return new_hit
@@ -267,11 +265,12 @@ function findSegmentsToCombine(results) {
       segmentsToCombine[ep_id] = seg_ids
     }
   }
+  // For debug purposes: to see if we have combinations
   console.log('segments to combine: ', segmentsToCombine)
   return segmentsToCombine
 }
 
 module.exports = {
-  // search,
-  search: searchLonger
+  search,
+  searchDesc
 }

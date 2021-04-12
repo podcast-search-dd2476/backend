@@ -12,7 +12,7 @@ app.use(cors());
 app.use(bodyParser.json())
 app.use(morgan("common"))
 
-app.get("/", async (req, res) => {
+app.get("/search", async (req, res) => {
     const { search, type, size } = req.query
     console.log(search)
     if (!search) return res.status(400).json({"error": "Missing search query"})
@@ -22,6 +22,18 @@ app.get("/", async (req, res) => {
     if (size) options["size"] = size
 
     return res.status(200).json(await searcher.search(search, options))
+})
+
+app.get("/searchDesc", async (req, res) => {
+    const { search, type, size } = req.query
+    console.log(search)
+    if (!search) return res.status(400).json({"error": "Missing search query"})
+    
+    let options = undefined
+    if (type) options = { type }
+    if (size) options["size"] = size
+
+    return res.status(200).json(await searcher.searchDesc(search, options))
 })
 
 const PORT = 5000
