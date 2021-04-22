@@ -55,7 +55,7 @@ const searchDescription = async (searchQ, options = defaultSearchOptions) => {
 }
 
 /**
- * Searches the metadata index
+ * Searches the surrounding segments 
  * @param {string} docID the episode id to find
  * @param {number} index the index of the current segment
  */
@@ -96,7 +96,7 @@ const searchSurroundingSegments = async (docID, index) => {
  * @param {string} docID the episode id to find
  * @param {Array} indices the indices to get
  */
- const searchFromIndices = async (docID, indices) => {
+const searchFromIndices = async (docID, indices) => {
   // TODO: Make some to get variable number of indices
   should_query = []
   indices.forEach(element => should_query.push({ match: { "index": element } }))
@@ -179,7 +179,7 @@ const searchDesc = async (query, options = defaultSearchOptions) => {
 }
 
 /**
- * given a query, returns objects that match the query from the transcripts index
+ * Given a query, returns objects that match the query from the transcripts index
  */
 const search = async (query, options = defaultSearchOptions) => {
   let startTime = Date.now()
@@ -214,7 +214,12 @@ const search = async (query, options = defaultSearchOptions) => {
     // handle segments that were the only match in that episode for specified query
     else if (!checked_episodes.includes(episode_id)) {
       const surrounding_texts = await searchSurroundingSegments(episode_id, text_index)
-      combined_segments = combineSegments(surrounding_texts, hit)
+
+      // Populate the hit with text from before and after.
+      await findSurroundingSegs(episode_id, text_index, hit)
+
+      // TODO: check if this is necessary
+      combined_segments = combineSegments({}, hit)
     }
     if (combined_segments != null) {
       const pod_data = await searchMetadata(episode_id)
@@ -309,7 +314,7 @@ function findSegmentsToCombine(results) {
     }
   }
   // For debug purposes: to see if we have combinations
-  //console.log('segments to combine: ', segmentsToCombine)
+  console.log('segments to combine: ', segmentsToCombine)
   return segmentsToCombine
 }
 
@@ -333,10 +338,10 @@ const expandSegmentNeighbours = async (results = defaultSearchOptions) => {
 
       // For merging, the index will be the later of the two
       startTime1 = new_segment_list[new_segment_list.length - 1]['transcript']['_source']['startTime']
-      
+
       content1 = new_segment_list[new_segment_list.length - 1]['transcript']['_source']['transcript']
       content2 = segment_list[i]['transcript']['_source']['transcript']
-      
+
       if (index1 + 1 == index2) {
         new_content = content1 + content2
 
@@ -346,7 +351,7 @@ const expandSegmentNeighbours = async (results = defaultSearchOptions) => {
         new_segment['transcript']['_source']['startTime'] = startTime1
 
         new_segment_list[new_segment_list.length - 1] = new_segment
-        
+
       } else {
         // If they are not direct neighbours, check the time distance between them
         indices_to_get = []
@@ -383,10 +388,59 @@ const expandSegmentNeighbours = async (results = defaultSearchOptions) => {
           new_segment_list.push(segment_list[i])
         }
       }
-    }    
+    }
     results[ep_id] = new_segment_list
   }
   return results
+}
+
+
+
+const findSurroundingSegs = async (episode_id, text_index, hit) => {
+  max_diff_time = 60
+
+
+  // Get two segments before and after
+  const indices_to_get = [text_index - 2, text_index - 1, text_index + 1, text_index + 2]
+  const surrounding_segs = await searchFromIndices(episode_id, indices_to_get)
+
+  // Sort the answers
+  surrounding_segs.sort((a, b) => (a['_source']['index'] > b['_source']['index']) ? 1 : -1)
+
+
+  startTime = parseFloat(hit['startTime'].split("s")[0])
+  endTime = parseFloat(hit['endTime'].split("s")[0])
+
+  // Check how close they are, if they are less than 1 min from each other, concat them
+  startContent = []
+  endContent = []
+  startTimes = []
+  endTimes = []
+
+  for (i = 0; i < surrounding_segs.length; i++) {
+    seg_endTime = surrounding_segs[i]['_source']['endTime']
+    if (seg_endTime !== undefined) {
+      diff = startTime - parseFloat(seg_endTime.split("s")[0])
+      if (diff < max_diff_time && 0 < diff) {
+        startContent.push(surrounding_segs[i]['_source']['transcript'])
+        startTimes.push(surrounding_segs[i]['_source']['startTime'])
+      } else if (parseFloat(surrounding_segs[i]['_source']['startTime'].split("s")[0]) - endTime < max_diff_time) {
+        endContent.push(surrounding_segs[i]['_source']['transcript'])
+        endTimes.push(surrounding_segs[i]['_source']['endTime'])
+      }
+    }
+  }
+
+  startTimes.push(hit['startTime'])
+  endTimes.unshift(hit['endTime'])
+
+  newContent = startContent.join(" ") + hit['transcript'] + endContent.join(" ")
+
+  hit['startTime'] = startTimes[0]
+  hit['endTime'] = endTimes[endTimes.length - 1]
+  hit['transcript'] = newContent
+
+  return hit
 }
 
 module.exports = {
