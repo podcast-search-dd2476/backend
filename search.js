@@ -29,7 +29,7 @@ const searchMetadata = async docID => {
  * Searches the metadata index for matches in name or description
  * @param {string} searchQ the text to search the podcast metadata fields
  */
- const searchDescription = async (searchQ, options = defaultSearchOptions) => {
+const searchDescription = async (searchQ, options = defaultSearchOptions) => {
   try {
     const { body } = await client.search({
       index: METADATA_INDEX,
@@ -38,8 +38,8 @@ const searchMetadata = async docID => {
         query: {
           bool: {
             should: [
-              {[options["type"]]: { "podcast_desc": searchQ }},
-              {[options["type"]]: { "podcast_name": searchQ }}
+              { [options["type"]]: { "podcast_desc": searchQ } },
+              { [options["type"]]: { "podcast_name": searchQ } }
             ]
           }
         }
@@ -59,7 +59,7 @@ const searchMetadata = async docID => {
  * @param {string} docID the episode id to find
  * @param {number} index the index of the current segment
  */
- const searchSurroundingSegments = async (docID, index) => {
+const searchSurroundingSegments = async (docID, index) => {
   // TODO: need to get all episodes (now only gets 10)
   try {
     const { body } = await client.search({
@@ -68,12 +68,14 @@ const searchMetadata = async docID => {
         query: {
           bool: {
             must: [
-              { match: { "id": docID }},
-              { bool: {
-                should: [
-                  { match: { "index": index+1 }},
-                  { match: { "index": index-1 }},
-                ]}
+              { match: { "id": docID } },
+              {
+                bool: {
+                  should: [
+                    { match: { "index": index + 1 } },
+                    { match: { "index": index - 1 } },
+                  ]
+                }
               }
             ]
           }
@@ -88,6 +90,42 @@ const searchMetadata = async docID => {
   }
 }
 
+
+/**
+ * Searches for spec indices in podcast episode with id docID
+ * @param {string} docID the episode id to find
+ * @param {Array} indices the indices to get
+ */
+ const searchFromIndices = async (docID, indices) => {
+  // TODO: Make some to get variable number of indices
+  should_query = []
+  indices.forEach(element => should_query.push({ match: { "index": element } }))
+  try {
+    const { body } = await client.search({
+      index: TRANSCRIPTS_INDEX,
+      body: {
+        query: {
+          bool: {
+            must: [
+              { match: { "id": docID } },
+              {
+                bool: {
+                  should: should_query
+                }
+              }
+            ]
+          }
+        }
+      }
+    })
+    return body.hits.hits
+  } catch (e) {
+    console.log(e)
+    return null
+  }
+}
+
+
 const defaultSearchOptions = {
   type: "match",
   size: 10,
@@ -99,7 +137,7 @@ const defaultSearchOptions = {
  */
 const searchPodcast = async (transcript, options = defaultSearchOptions) => {
   if (options.size <= 0) options.size = 10
-  
+
   try {
     const { body } = await client.search({
       index: TRANSCRIPTS_INDEX,
@@ -127,7 +165,7 @@ const searchDesc = async (query, options = defaultSearchOptions) => {
   const descNameResult = await searchDescription(query, options)
   if (descNameResult.error) return descNameResult
 
-  const results = { results: [], error: false}
+  const results = { results: [], error: false }
 
   // TODO: display this in FE?
   // add the podcasts that match on title or description
@@ -149,9 +187,14 @@ const search = async (query, options = defaultSearchOptions) => {
   const result = await searchPodcast(query, options)
   if (result.error) return result
 
-  const results = { results: [], error: false}
+  const results = { results: [], error: false }
 
   segs_to_combine = findSegmentsToCombine(result.body.hits.hits)
+
+  segs_expanded = await expandSegmentNeighbours(segs_to_combine)
+
+  seqs_to_combine = segs_expanded
+
   let checked_episodes = []
 
   // add the podcast segments that match on transcript to the data structure to return
@@ -173,12 +216,12 @@ const search = async (query, options = defaultSearchOptions) => {
       const surrounding_texts = await searchSurroundingSegments(episode_id, text_index)
       combined_segments = combineSegments(surrounding_texts, hit)
     }
-    if ( combined_segments != null) {
+    if (combined_segments != null) {
       const pod_data = await searchMetadata(episode_id)
       // Only save the matching episode
       const episode_data = pod_data.hits.hits[0]._source.episodes.filter(e => e.episode_filename_prefix === episode_id)[0]
 
-      results.results.push({pod_data: pod_data.hits.hits[0]._source, transcript: combined_segments, episode_data})
+      results.results.push({ pod_data: pod_data.hits.hits[0]._source, transcript: combined_segments, episode_data })
     }
   }
 
@@ -193,7 +236,7 @@ const search = async (query, options = defaultSearchOptions) => {
  * Groups the matching episodes by podcast
  * @param {Array} results Array of episodes
  */
-function groupByPodcast (results) {
+function groupByPodcast(results) {
   let all_podcasts = {}
   for (let i = 0; i < results.length; i++) {
     let episode = results[i]
@@ -248,9 +291,9 @@ function findSegmentsToCombine(results) {
     let seg_index = currText.index
     if (episode_id in allEpisodes) {
       let existingSegments = allEpisodes[episode_id]
-      existingSegments.push({index: seg_index, transcript: results[i]})
+      existingSegments.push({ index: seg_index, transcript: results[i] })
     } else {
-      allEpisodes[episode_id] = [{index: seg_index, transcript: results[i]}]
+      allEpisodes[episode_id] = [{ index: seg_index, transcript: results[i] }]
     }
   }
 
@@ -266,8 +309,84 @@ function findSegmentsToCombine(results) {
     }
   }
   // For debug purposes: to see if we have combinations
-  console.log('segments to combine: ', segmentsToCombine)
+  //console.log('segments to combine: ', segmentsToCombine)
   return segmentsToCombine
+}
+
+/**
+ * Function to find which episode segments that are closer than -- 1 min -- to each other or consecutive, 
+ * add them and the episodes between them together.  
+ * @param {Object} results Object consisting of arrays of text segment objects that belong to the same episode of a podcast.
+ */
+const expandSegmentNeighbours = async (results = defaultSearchOptions) => {
+  max_diff_time = 60
+  // Iterate through all the podcast episodes
+  for (const [ep_id, segment_list] of Object.entries(results)) {
+    // Sort the list so that we go through the indices in the right order
+    segment_list.sort((a, b) => (a.index > b.index) ? 1 : -1)
+
+    new_segment_list = [segment_list[0]]
+
+    for (i = 1; i < segment_list.length; i++) {
+      index1 = new_segment_list[new_segment_list.length - 1]['transcript']['_source']['index']
+      index2 = segment_list[i]['transcript']['_source']['index']
+
+      // For merging, the index will be the later of the two
+      startTime1 = new_segment_list[new_segment_list.length - 1]['transcript']['_source']['startTime']
+      
+      content1 = new_segment_list[new_segment_list.length - 1]['transcript']['_source']['transcript']
+      content2 = segment_list[i]['transcript']['_source']['transcript']
+      
+      if (index1 + 1 == index2) {
+        new_content = content1 + content2
+
+        new_segment = segment_list[i]
+
+        new_segment['transcript']['_source']['transcript'] = new_content
+        new_segment['transcript']['_source']['startTime'] = startTime1
+
+        new_segment_list[new_segment_list.length - 1] = new_segment
+        
+      } else {
+        // If they are not direct neighbours, check the time distance between them
+        indices_to_get = []
+        endTime1 = parseFloat(new_segment_list[new_segment_list.length - 1]['transcript']['_source']['endTime'].split("s")[0])
+        startTime2 = parseFloat(segment_list[i]['transcript']['_source']['startTime'].split("s")[0])
+
+        if (startTime2 - endTime1 < max_diff_time) {
+          // Get all indices between them
+          for (j = index1 + 1; j < index2; j++) {
+            indices_to_get.push(j)
+          }
+
+          // TODO: hämtar endast 10 st!
+          const segs_between = await searchFromIndices(ep_id, indices_to_get)
+
+          let new_contents = [content1]
+
+          if (segs_between !== null) {
+            segs_between.sort((a, b) => (a.index > b.index) ? 1 : -1)
+            segs_between.forEach(seg => new_contents.push(seg['_source']['transcript']))
+          }
+
+          new_contents.push(content2)
+
+          new_segment = segment_list[i]
+
+          new_segment['transcript']['_source']['transcript'] = new_contents.join(' ')
+          new_segment['transcript']['_source']['startTime'] = startTime1
+
+          new_segment_list[new_segment_list.length - 1] = new_segment
+
+        } else {
+          // Just add them as a new separate segment in the new_segments_list
+          new_segment_list.push(segment_list[i])
+        }
+      }
+    }    
+    results[ep_id] = new_segment_list
+  }
+  return results
 }
 
 module.exports = {
