@@ -191,9 +191,9 @@ const search = async (query, options = defaultSearchOptions) => {
 
   segs_to_combine = findSegmentsToCombine(result.body.hits.hits)
 
-  segs_expanded = await expandSegmentNeighbours(segs_to_combine)
 
-  seqs_to_combine = segs_expanded
+  segs_expanded = await expandSegmentNeighbours(segs_to_combine)
+  segs_to_combine = segs_expanded
 
   let checked_episodes = []
 
@@ -206,14 +206,24 @@ const search = async (query, options = defaultSearchOptions) => {
 
     // handle the segments where other segments of same episode also matched on the query
     if (segs_to_combine[episode_id] && !checked_episodes.includes(episode_id)) {
-      let segments = segs_to_combine[episode_id].filter(s => s.index != text_index).map(s => s.transcript)
-      combined_segments = combineSegments(segments, hit)
+      // let segments = segs_to_combine[episode_id].filter(s => s.index != text_index).map(s => s.transcript) // these have already been combined..
+      let segments = segs_to_combine[episode_id].map(s => s.transcript) //
+      if (segments.length == 1) {
+        combined_segments = setSegments(segments, hit)
+      } else {
+        // Get the surrounding segments for each of the segments in an episode that matched
+        for (let i = 0; i < segments.length; i++) {
+          await findSurroundingSegs(episode_id, segments[i]._source.index, segments[i]._source)
+        }
+        combined_segments = setSegments(segments, hit)
+      }
+      // TODO: change this! segments should already be combined in expandedSegment..
       checked_episodes.push(episode_id)
     }
 
     // handle segments that were the only match in that episode for specified query
     else if (!checked_episodes.includes(episode_id)) {
-      const surrounding_texts = await searchSurroundingSegments(episode_id, text_index)
+      // const surrounding_texts = await searchSurroundingSegments(episode_id, text_index)
 
       // Populate the hit with text from before and after.
       await findSurroundingSegs(episode_id, text_index, hit)
@@ -283,6 +293,33 @@ function combineSegments(surrounding_segments, hit) {
   }
   return new_hit
 }
+// Function to set the segments to be used in the final datastructure.
+function setSegments(matching_segments, hit) {
+  const new_hit = {}
+  new_hit.original_match_index = []
+  new_hit.transcripts = []
+  if (matching_segments.length == 1) {
+    const segment = matching_segments[0]._source
+    new_hit.original_match_index.push(segment.index)
+    new_hit.transcripts = [segment]
+    new_hit.startTime = segment.startTime
+    new_hit.endTime = segment.endTime
+  } else {
+    for (let i = 0; i < matching_segments.length; i++) {
+      const segment = matching_segments[i]._source
+      new_hit.original_match_index.push(segment.index)
+      if (segment.index < hit.index) {
+        // insert text before the original text
+        new_hit.transcripts.splice(0, 0, segment)
+        new_hit.startTime = segment.startTime
+      } else { // the current text is after the text that was originally retrieved
+        new_hit.transcripts.push(segment)
+        new_hit.endTime = segment.endTime
+      }
+    }
+  }
+  return new_hit
+}
 
 /**
  * Function to find all segments returned from the search that are from the same episode of a podcast
@@ -335,7 +372,7 @@ const expandSegmentNeighbours = async (results = defaultSearchOptions) => {
     for (i = 1; i < segment_list.length; i++) {
       index1 = new_segment_list[new_segment_list.length - 1]['transcript']['_source']['index']
       index2 = segment_list[i]['transcript']['_source']['index']
-
+      // does this work if there is more than 2 segs from the same episode??
       // For merging, the index will be the later of the two
       startTime1 = new_segment_list[new_segment_list.length - 1]['transcript']['_source']['startTime']
 
@@ -355,27 +392,41 @@ const expandSegmentNeighbours = async (results = defaultSearchOptions) => {
       } else {
         // If they are not direct neighbours, check the time distance between them
         indices_to_get = []
+        startTime1Float = parseFloat(new_segment_list[new_segment_list.length - 1]['transcript']['_source']['startTime'].split("s")[0])
         endTime1 = parseFloat(new_segment_list[new_segment_list.length - 1]['transcript']['_source']['endTime'].split("s")[0])
         startTime2 = parseFloat(segment_list[i]['transcript']['_source']['startTime'].split("s")[0])
+        endTime2 = parseFloat(segment_list[i]['transcript']['_source']['endTime'].split("s")[0])
 
-        if (startTime2 - endTime1 < max_diff_time) {
+        if (startTime2 - endTime1 < max_diff_time || index2 - index1 < 4) { // changed this since we get +-2 segs when combining anyway..
           // Get all indices between them
           for (j = index1 + 1; j < index2; j++) {
             indices_to_get.push(j)
           }
+          if (endTime2 - startTime1Float < 120) {
+            // get two new segments if the resulting segment is too short!
+            let min = index1 -1
+            let max = index2 + 1
+            indices_to_get.push(max)
+            if (min >= 0) {
+              indices_to_get.splice(0, 0, min)
+            }
+          }
 
           // TODO: hämtar endast 10 st!
           const segs_between = await searchFromIndices(ep_id, indices_to_get)
-
+          
+          // append the original start and end segments to the segs between array
           let new_contents = [content1]
-
+          
           if (segs_between !== null) {
             segs_between.sort((a, b) => (a.index > b.index) ? 1 : -1)
             segs_between.forEach(seg => new_contents.push(seg['_source']['transcript']))
           }
-
+          
           new_contents.push(content2)
-
+          // sort the segments, as we could have gotten segments prior to the first and after the last!
+          new_contents.sort((a, b) => (a.index > b.index) ? 1 : -1)
+          
           new_segment = segment_list[i]
 
           new_segment['transcript']['_source']['transcript'] = new_contents.join(' ')
