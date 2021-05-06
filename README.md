@@ -1,4 +1,4 @@
-# podcast-search
+# podcast-search backend
 Backend for our project in DD2476 Search Engines and Information Retrieval.
 
 # Environment variables
