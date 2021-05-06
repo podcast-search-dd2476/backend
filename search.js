@@ -293,7 +293,7 @@ function combineSegments(surrounding_segments, hit) {
   }
   return new_hit
 }
-// Function to set the segments to be used in the final datastructure.
+// Function to set the segments to be used in the final datastructure. omitts the 'hit' and only add those in structure
 function setSegments(matching_segments, hit) {
   const new_hit = {}
   new_hit.original_match_index = []
