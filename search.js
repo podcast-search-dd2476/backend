@@ -158,6 +158,38 @@ const searchPodcast = async (transcript, options = defaultSearchOptions) => {
 }
 
 /**
+ * Alternative search method used ot compare the search results
+ * @param {string} transcript the text to search for
+ */
+ const searchPodcastAnd = async (transcript, options = defaultSearchOptions) => {
+  if (options.size <= 0) options.size = 10
+
+  try {
+    const { body } = await client.search({
+      index: TRANSCRIPTS_INDEX,
+      size: options.size || defaultSearchOptions.size,
+      body: {
+        query: {
+          query_string: {
+            fields:  ["transcript"],
+            query: transcript,
+            default_operator: "AND",
+            minimum_should_match: "30%",
+            fuzziness: "AUTO:3,5"
+          }
+        }
+      }
+    })
+
+    return { body, error: false }
+
+  } catch (e) {
+    console.log(e)
+    return { body: e, error: true }
+  }
+}
+
+/**
  * given a query, returns objects that match the query from  metadata index
  */
 const searchDesc = async (query, options = defaultSearchOptions) => {
