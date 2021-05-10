@@ -132,10 +132,10 @@ const defaultSearchOptions = {
 }
 
 /**
- * Searches for podcasts
+ * Alternative search using OR in intersection search
  * @param {string} transcript the text to search for
  */
-const searchPodcast = async (transcript, options = defaultSearchOptions) => {
+const searchPodcastOr = async (transcript, options = defaultSearchOptions) => {
   if (options.size <= 0) options.size = 10
 
   try {
@@ -158,30 +158,43 @@ const searchPodcast = async (transcript, options = defaultSearchOptions) => {
 }
 
 /**
- * Alternative search method used ot compare the search results
+ * Search method. Does phrase search if that is selected by user.
  * @param {string} transcript the text to search for
  */
- const searchPodcastAnd = async (transcript, options = defaultSearchOptions) => {
+ const searchPodcast = async (transcript, options = defaultSearchOptions) => {
   if (options.size <= 0) options.size = 10
 
   try {
-    const { body } = await client.search({
-      index: TRANSCRIPTS_INDEX,
-      size: options.size || defaultSearchOptions.size,
-      body: {
-        query: {
-          query_string: {
-            fields:  ["transcript"],
-            query: transcript,
-            default_operator: "AND",
-            minimum_should_match: "30%",
-            fuzziness: "AUTO:3,5"
+    if (options.type == "match_phrase") {
+      const { body } = await client.search({
+        index: TRANSCRIPTS_INDEX,
+        size: options.size || defaultSearchOptions.size,
+        body: {
+          query: {
+            [options["type"]]: { "transcript": transcript }
           }
         }
-      }
-    })
+      })
+  
+      return { body, error: false }
 
-    return { body, error: false }
+    } else {
+      const { body } = await client.search({
+        index: TRANSCRIPTS_INDEX,
+        size: options.size || defaultSearchOptions.size,
+        body: {
+          query: {
+            query_string: {
+              fields:  ["transcript"],
+              query: transcript,
+              default_operator: "AND",
+            }
+          }
+        }
+      })
+
+      return { body, error: false }
+    }
 
   } catch (e) {
     console.log(e)
